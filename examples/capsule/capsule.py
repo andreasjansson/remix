@@ -21,79 +21,89 @@ from pyechonest import util
 
 from capsule_support import order_tracks, equalize_tracks, resample_features, timbre_whiten, initialize, make_transition, terminate, FADE_OUT, display_actions, is_valid
 
+class Capsule:
+
+    def __init__(self, audio_files, inter, trans, verbose = False, progress_callback = None):
+        self.inter = inter
+        self.trans = trans
+        self.verbose = verbose
+        self.progress_callback = progress_callback
+        self.tracks = []
+        for filename in audio_files:
+            try:
+                if filename is not None and (filename.find('http://') == 0 or filename.find('https://') == 0):
+                    _, ext = os.path.splitext(filename)
+                    temp_handle, temp_filename = tempfile.mkstemp(ext)
+                    if self.verbose:
+                        print >> sys.stderr, "Downloading from %s to %s" % (filename, temp_filename)
+                    resp = urllib2.urlopen(filename)
+                    os.write(temp_handle, resp.read())
+                    os.close(temp_handle)
+                    filename = temp_filename
+
+                track = LocalAudioFile(filename, verbose=selfverbose, sampleRate = 44100, numChannels = 2)
+                self.tracks.append(track)
+                if progress_callback:
+                    progress_callback(len(self.tracks) / len(audio_files))
+            except Exception, e:
+                if self.verbose:
+                    print >> sys.stderr, 'Failed to analyse %s' % filename
+
+    def order(self):
+        if self.verbose: print "Ordering tracks..."
+        self.tracks = order_tracks(self.tracks)
+
+    def equalize(self):
+        equalize_tracks(self.tracks)
+        if self.verbose:
+            print
+            for track in self.tracks:
+                print "Vol = %.0f%%\t%s" % (track.gain*100.0, track.analysis.pyechonest_track.id)
+            print
+
+    def resample(self):
+        valid = []
+        # compute resampled and normalized matrices
+        for track in self.tracks:
+            if self.verbose: print "Resampling features for", track.analysis.pyechonest_track.id
+            track.resampled = resample_features(track, rate='beats')
+            track.resampled['matrix'] = timbre_whiten(track.resampled['matrix'])
+            # remove tracks that are too small
+            if is_valid(track, inter, trans):
+                valid.append(track)
+            # for compatibility, we make mono tracks stereo
+            track = make_stereo(track)
+        self.tracks = valid
+
+    def transitions(self):
+        # Initial transition. Should contain 2 instructions: fadein, and playback.
+        if self.verbose: print "Computing transitions..."
+        start = initialize(self.tracks[0], inter, trans)
+
+        # Middle transitions. Should each contain 2 instructions: crossmatch, playback.
+        middle = []
+        [middle.extend(make_transition(t1, t2, inter, trans)) for (t1, t2) in tuples(self.tracks)]
+
+        # Last chunk. Should contain 1 instruction: fadeout.
+        end = terminate(self.tracks[-1], FADE_OUT)
+
+        self.actions = start + middle + end
+
+    def render(self, filename):
+        if self.verbose:
+            print "Rendering..."
+        render(self.actions, filename, self.verbose)
+
+    def is_empty(self):
+        return len(self.tracks) < 1
+        
+    
 
 def tuples(l, n=2):
     """ returns n-tuples from l.
         e.g. tuples(range(4), n=2) -> [(0, 1), (1, 2), (2, 3)]
     """
     return zip(*[l[i:] for i in range(n)])
-
-def do_work(audio_files, options):
-
-    inter = float(options.inter)
-    trans = float(options.transition)
-    order = bool(options.order)
-    equal = bool(options.equalize)
-    verbose = bool(options.verbose)
-    
-    tracks = []
-    for filename in audio_files:
-        try:
-            if filename is not None and (filename.find('http://') == 0 or filename.find('https://') == 0):
-                _, ext = os.path.splitext(filename)
-                temp_handle, temp_filename = tempfile.mkstemp(ext)
-                if verbose:
-                    print >> sys.stderr, "Downloading from %s to %s" % (filename, temp_filename)
-                resp = urllib2.urlopen(filename)
-                os.write(temp_handle, resp.read())
-                os.close(temp_handle)
-                filename = temp_filename
-
-            track = LocalAudioFile(filename, verbose=verbose, sampleRate = 44100, numChannels = 2)
-            tracks.append(track)
-        except Exception, e:
-            if verbose:
-                print 'Failed to analyse %s' % filename
-
-    # decide on an initial order for those tracks
-    if order == True:
-        if verbose: print "Ordering tracks..."
-        tracks = order_tracks(tracks)
-    
-    if equal == True:
-        equalize_tracks(tracks)
-        if verbose:
-            print
-            for track in tracks:
-                print "Vol = %.0f%%\t%s" % (track.gain*100.0, track.analysis.pyechonest_track.id)
-            print
-    
-    valid = []
-    # compute resampled and normalized matrices
-    for track in tracks:
-        if verbose: print "Resampling features for", track.analysis.pyechonest_track.id
-        track.resampled = resample_features(track, rate='beats')
-        track.resampled['matrix'] = timbre_whiten(track.resampled['matrix'])
-        # remove tracks that are too small
-        if is_valid(track, inter, trans):
-            valid.append(track)
-        # for compatibility, we make mono tracks stereo
-        track = make_stereo(track)
-    tracks = valid
-    
-    if len(tracks) < 1: return []
-    # Initial transition. Should contain 2 instructions: fadein, and playback.
-    if verbose: print "Computing transitions..."
-    start = initialize(tracks[0], inter, trans)
-    
-    # Middle transitions. Should each contain 2 instructions: crossmatch, playback.
-    middle = []
-    [middle.extend(make_transition(t1, t2, inter, trans)) for (t1, t2) in tuples(tracks)]
-    
-    # Last chunk. Should contain 1 instruction: fadeout.
-    end = terminate(tracks[-1], FADE_OUT)
-    
-    return start + middle + end
 
 def get_options(warn=False):
     usage = "usage: %s [options] <list of mp3s>" % sys.argv[0]
@@ -112,16 +122,24 @@ def get_options(warn=False):
     
 def main():
     options, args = get_options(warn=True);
-    actions = do_work(args, options)
-    verbose = bool(options.verbose)
+
+    capsule = Capsule(args, options.inter, options.trans, options.verbose)
+
+    # decide on an initial order for those tracks
+    if options.order == True:
+        capsule.order()
     
-    if verbose:
-        #display_actions(actions)
-        print "Output Duration = %.3f sec" % sum(act.duration for act in actions)
+    if options.equal == True:
+        capsule.equalize()
+
+    capsule.resample()
     
-        print "Rendering..."
+    if capsule.is_empty(): return []
+
+    capsule.transitions()
+
     # Send to renderer
-    render(actions, 'capsule.mp3', verbose)
+    capsule.render('capsule.mp3')
     return 1
     
 if __name__ == "__main__":
