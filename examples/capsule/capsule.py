@@ -30,7 +30,7 @@ class Capsule:
         self.progress_callback = progress_callback
         self.tracks = []
         for filename in audio_files:
-            try:
+#            try:
                 if filename is not None and (filename.find('http://') == 0 or filename.find('https://') == 0):
                     _, ext = os.path.splitext(filename)
                     temp_handle, temp_filename = tempfile.mkstemp(ext)
@@ -41,13 +41,13 @@ class Capsule:
                     os.close(temp_handle)
                     filename = temp_filename
 
-                track = LocalAudioFile(filename, verbose=selfverbose, sampleRate = 44100, numChannels = 2)
+                track = LocalAudioFile(filename, verbose=self.verbose, sampleRate = 44100, numChannels = 2)
                 self.tracks.append(track)
                 if progress_callback:
                     progress_callback(len(self.tracks) / len(audio_files))
-            except Exception, e:
-                if self.verbose:
-                    print >> sys.stderr, 'Failed to analyse %s' % filename
+#            except Exception, e:
+#                if self.verbose:
+#                    print >> sys.stderr, 'Failed to analyse %s' % filename
 
     def order(self):
         if self.verbose: print "Ordering tracks..."
@@ -69,7 +69,7 @@ class Capsule:
             track.resampled = resample_features(track, rate='beats')
             track.resampled['matrix'] = timbre_whiten(track.resampled['matrix'])
             # remove tracks that are too small
-            if is_valid(track, inter, trans):
+            if is_valid(track, self.inter, self.trans):
                 valid.append(track)
             # for compatibility, we make mono tracks stereo
             track = make_stereo(track)
@@ -78,11 +78,11 @@ class Capsule:
     def transitions(self):
         # Initial transition. Should contain 2 instructions: fadein, and playback.
         if self.verbose: print "Computing transitions..."
-        start = initialize(self.tracks[0], inter, trans)
+        start = initialize(self.tracks[0], self.inter, self.trans)
 
         # Middle transitions. Should each contain 2 instructions: crossmatch, playback.
         middle = []
-        [middle.extend(make_transition(t1, t2, inter, trans)) for (t1, t2) in tuples(self.tracks)]
+        [middle.extend(make_transition(t1, t2, self.inter, self.trans)) for (t1, t2) in tuples(self.tracks)]
 
         # Last chunk. Should contain 1 instruction: fadeout.
         end = terminate(self.tracks[-1], FADE_OUT)
@@ -123,13 +123,13 @@ def get_options(warn=False):
 def main():
     options, args = get_options(warn=True);
 
-    capsule = Capsule(args, options.inter, options.trans, options.verbose)
+    capsule = Capsule(args, options.inter, options.transition, options.verbose)
 
     # decide on an initial order for those tracks
     if options.order == True:
         capsule.order()
     
-    if options.equal == True:
+    if options.equalize == True:
         capsule.equalize()
 
     capsule.resample()
