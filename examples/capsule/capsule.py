@@ -12,6 +12,8 @@ Created by Tristan Jehan and Jason Sundram.
 import os
 import sys
 from optparse import OptionParser
+import tempfile
+import urllib2
 
 from echonest.action import render, make_stereo
 from echonest.audio import LocalAudioFile
@@ -34,10 +36,25 @@ def do_work(audio_files, options):
     equal = bool(options.equalize)
     verbose = bool(options.verbose)
     
-    # Get pyechonest/remix objects
-    analyze = lambda x : LocalAudioFile(x, verbose=verbose)
-    tracks = map(analyze, audio_files)
-    
+    tracks = []
+    for filename in audio_files:
+        try:
+            if filename is not None and (filename.find('http://') == 0 or filename.find('https://') == 0):
+                _, ext = os.path.splitext(filename)
+                temp_handle, temp_filename = tempfile.mkstemp(ext)
+                if verbose:
+                    print >> sys.stderr, "Downloading from %s to %s" % (filename, temp_filename)
+                resp = urllib2.urlopen(filename)
+                os.write(temp_handle, resp.read())
+                os.close(temp_handle)
+                filename = temp_filename
+
+            track = LocalAudioFile(filename, verbose=verbose, sampleRate = 44100, numChannels = 2)
+            tracks.append(track)
+        except Exception, e:
+            if verbose:
+                print 'Failed to analyse %s' % filename
+
     # decide on an initial order for those tracks
     if order == True:
         if verbose: print "Ordering tracks..."
@@ -48,13 +65,13 @@ def do_work(audio_files, options):
         if verbose:
             print
             for track in tracks:
-                print "Vol = %.0f%%\t%s" % (track.gain*100.0, track.analysis.pyechonest_track.title)
+                print "Vol = %.0f%%\t%s" % (track.gain*100.0, track.analysis.pyechonest_track.id)
             print
     
     valid = []
     # compute resampled and normalized matrices
     for track in tracks:
-        if verbose: print "Resampling features for", track.analysis.pyechonest_track.title
+        if verbose: print "Resampling features for", track.analysis.pyechonest_track.id
         track.resampled = resample_features(track, rate='beats')
         track.resampled['matrix'] = timbre_whiten(track.resampled['matrix'])
         # remove tracks that are too small
@@ -99,7 +116,7 @@ def main():
     verbose = bool(options.verbose)
     
     if verbose:
-        display_actions(actions)
+        #display_actions(actions)
         print "Output Duration = %.3f sec" % sum(act.duration for act in actions)
     
         print "Rendering..."

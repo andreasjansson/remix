@@ -293,6 +293,7 @@ class AudioData(AudioRenderable):
         .. _numpy.array: http://docs.scipy.org/doc/numpy/reference/generated/numpy.array.html
         """
         self.verbose = verbose
+
         if (filename is not None) and (ndarray is None) :
             if sampleRate is None or numChannels is None:
                 # force sampleRate and numChannels to 44100 hz, 2
@@ -322,6 +323,7 @@ class AudioData(AudioRenderable):
     def load(self):
         if isinstance(self.data, numpy.ndarray):
             return
+
         temp_file_handle = None
         if self.filename.lower().endswith(".wav") and (self.sampleRate, self.numChannels) == (44100, 2):
             file_to_read = self.filename
@@ -333,7 +335,7 @@ class AudioData(AudioRenderable):
                 numChannels=self.numChannels, sampleRate=self.sampleRate, verbose=self.verbose)
             ffmpeg_error_check(result[1])
             file_to_read = self.convertedfile
-        
+
         w = wave.open(file_to_read, 'r')
         numFrames = w.getnframes()
         raw = w.readframes(numFrames)
@@ -865,7 +867,7 @@ class LocalAudioFile(AudioData):
     Analyze API, then it does not bother uploading the file.
     """
 
-    def __new__(cls, filename, verbose=True, defer=False):
+    def __new__(cls, filename, verbose=True, defer=False, sampleRate=None, numChannels=None):
         # There must be a better way to avoid collisions between analysis files and .wav files
         if '.analysis.en' in filename:
             print >> sys.stderr, "Reading analysis from local file " + filename
@@ -875,9 +877,9 @@ class LocalAudioFile(AudioData):
             return audiofile
         else:
             # This just creates the object and goes straight on to initializing it
-            return AudioData.__new__(cls, filename=filename, verbose=verbose, defer=defer)
+            return AudioData.__new__(cls, filename=filename, verbose=verbose, defer=defer, sampleRate=sampleRate)
 
-    def __init__(self, filename, verbose=True, defer=False):
+    def __init__(self, filename, verbose=True, defer=False, sampleRate=None, numChannels=None):
         """
         :param filename: path to a local MP3 file
         """
@@ -885,8 +887,9 @@ class LocalAudioFile(AudioData):
         if '.analysis.en' in filename:
             self.is_local = True
         else:
-            AudioData.__init__(self, filename=filename, verbose=verbose, defer=defer)
-            track_md5 = hashlib.md5(file(filename, 'rb').read()).hexdigest()
+            AudioData.__init__(self, filename=filename, verbose=verbose, defer=defer,
+                               sampleRate=sampleRate, numChannels=numChannels)
+            track_md5 = hashlib.md5(file(self.filename, 'rb').read()).hexdigest()
             if verbose:
                 print >> sys.stderr, "Computed MD5 of file is " + track_md5 
             try:
