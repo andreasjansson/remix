@@ -31,6 +31,7 @@ class Capsule:
         self.tracks = []
         for filename in audio_files:
 #            try:
+                original_filename = None
                 if filename is not None and (filename.find('http://') == 0 or filename.find('https://') == 0):
                     _, ext = os.path.splitext(filename)
                     temp_handle, temp_filename = tempfile.mkstemp(ext)
@@ -39,12 +40,19 @@ class Capsule:
                     resp = urllib2.urlopen(filename)
                     os.write(temp_handle, resp.read())
                     os.close(temp_handle)
+                    original_filename = filename
                     filename = temp_filename
 
-                track = LocalAudioFile(filename, verbose=self.verbose, sampleRate = 44100, numChannels = 2)
+                track = LocalAudioFile(str(filename), verbose=self.verbose, sampleRate = 44100, numChannels = 2)
+                if original_filename:
+                    track.original_filename = original_filename
+
                 self.tracks.append(track)
-                if progress_callback:
-                    progress_callback(len(self.tracks) / len(audio_files))
+
+                # assume next steps take 10% of the time
+                if progress_callback is not None:
+                    progress_callback(0.9 * len(self.tracks) / float(len(audio_files)))
+
 #            except Exception, e:
 #                if self.verbose:
 #                    print >> sys.stderr, 'Failed to analyse %s' % filename
@@ -96,6 +104,11 @@ class Capsule:
 
     def is_empty(self):
         return len(self.tracks) < 1
+
+    def cleanup(self):
+        for track in self.tracks:
+            if track.original_filename:
+                os.unlink(track.filename)
         
     
 
