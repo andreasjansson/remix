@@ -14,6 +14,7 @@ import sys
 from optparse import OptionParser
 import tempfile
 import urllib2
+import traceback
 
 from echonest.action import render, make_stereo
 from echonest.audio import LocalAudioFile
@@ -30,10 +31,13 @@ class Capsule:
         self.progress_callback = progress_callback
         self.tracks = []
         for filename in audio_files:
-#            try:
+            try:
                 original_filename = None
                 if filename is not None and (filename.find('http://') == 0 or filename.find('https://') == 0):
                     _, ext = os.path.splitext(filename)
+                    # if no extension, naively assume mp3
+                    if not ext:
+                        ext = '.mp3'
                     temp_handle, temp_filename = tempfile.mkstemp(ext)
                     if self.verbose:
                         print >> sys.stderr, "Downloading from %s to %s" % (filename, temp_filename)
@@ -53,9 +57,9 @@ class Capsule:
                 if progress_callback is not None:
                     progress_callback(0.9 * len(self.tracks) / float(len(audio_files)))
 
-#            except Exception, e:
-#                if self.verbose:
-#                    print >> sys.stderr, 'Failed to analyse %s' % filename
+            except Exception, e:
+                if self.verbose:
+                    print >> sys.stderr, 'Failed to analyse %s [%s]' % (filename, e)
 
     def order(self):
         if self.verbose: print "Ordering tracks..."
@@ -109,6 +113,7 @@ class Capsule:
         for track in self.tracks:
             if track.original_filename:
                 os.unlink(track.filename)
+            track.unload()
         
     
 
