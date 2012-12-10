@@ -35,8 +35,8 @@ class Capsule:
                 original_filename = None
                 if filename is not None and (filename.find('http://') == 0 or filename.find('https://') == 0):
                     _, ext = os.path.splitext(filename)
-                    # if no extension, naively assume mp3
-                    if not ext:
+                    # if unrecognised extension, naively assume mp3
+                    if ext not in ['.mp3', '.wav', '.m4a', '.au', '.ogg', '.mp4']:
                         ext = '.mp3'
                     temp_handle, temp_filename = tempfile.mkstemp(ext)
                     if self.verbose:
