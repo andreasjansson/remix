@@ -14,7 +14,6 @@ import sys
 from optparse import OptionParser
 import tempfile
 import urllib2
-import traceback
 
 from echonest.action import render, make_stereo
 from echonest.audio import LocalAudioFile
@@ -141,7 +140,7 @@ def get_options(warn=False):
 def main():
     options, args = get_options(warn=True);
 
-    capsule = Capsule(args, options.inter, options.transition, options.verbose)
+    capsule = Capsule(args, float(options.inter), float(options.transition), options.verbose)
 
     # decide on an initial order for those tracks
     if options.order == True:
