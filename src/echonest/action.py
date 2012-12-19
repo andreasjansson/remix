@@ -62,7 +62,7 @@ class Playback(object):
         gain = getattr(self.track, 'gain', None)
         if gain != None:
             # limit expects a float32 vector
-            output.data = limit(multiply(output.data, float32(gain)))
+            output.data = limit(list(multiply(list(output.data), float32(gain))))
             
         return output
     
@@ -81,7 +81,7 @@ class Fadeout(Playback):
         gain = getattr(self.track, 'gain', 1.0)
         output = self.track[self]
         # second parameter is optional -- in place function for now
-        output.data = fadeout(output.data, gain)
+        output.data = fadeout(list(output.data), gain)
         return output
     
     def __repr__(self):
@@ -99,7 +99,8 @@ class Fadein(Playback):
         gain = getattr(self.track, 'gain', 1.0)
         output = self.track[self]
         # second parameter is optional -- in place function for now
-        output.data = fadein(output.data, gain)
+
+        output.data = fadein(list(output.data), gain)
         return output
     
     def __repr__(self):
@@ -141,7 +142,7 @@ class Crossfade(object):
     
     def render(self):
         t1, t2 = map(make_stereo, (self.t1.get(), self.t2.get()))
-        vecout = crossfade(t1.data, t2.data, self.mode)
+        vecout = crossfade(list(t1.data), list(t2.data), self.mode)
         audio_out = AudioData(ndarray=vecout, shape=vecout.shape, 
                                 sampleRate=t1.sampleRate, 
                                 numChannels=vecout.shape[1])
@@ -239,7 +240,7 @@ class Crossmatch(Blend):
                     self.durations[i] / l[i][1])
             rates.append(rate)
         
-        vecout = dirac.timeScale(vecin, rates, t.sampleRate, 0)
+        vecout = dirac.timeScale(list(vecin), rates, t.sampleRate, 0)
         if hasattr(t, 'gain'):
             vecout = limit(multiply(vecout, float32(t.gain)))
         

@@ -274,7 +274,7 @@ class AudioData(AudioRenderable):
         
     .. _numpy.array: http://docs.scipy.org/doc/numpy/reference/generated/numpy.array.html
     """
-    def __init__(self, filename=None, ndarray = None, shape=None, sampleRate=None, numChannels=None, defer=False, verbose=True):
+    def __init__(self, filename=None, ndarray = None, shape=None, sampleRate=None, numChannels=None, defer=False, verbose=True, data_on_disk=True):
         """
         Given an input `ndarray`, import the sample values and shape 
         (if none is specified) of the input `numpy.array`.
@@ -294,6 +294,11 @@ class AudioData(AudioRenderable):
         """
         self.verbose = verbose
 
+        if data_on_disk:
+            self.data = OnDiskData()
+        else:
+            self.data = InMemoryData()
+
         if (filename is not None) and (ndarray is None) :
             if sampleRate is None or numChannels is None:
                 # force sampleRate and numChannels to 44100 hz, 2
@@ -308,14 +313,14 @@ class AudioData(AudioRenderable):
         self.convertedfile = None
         self.endindex = 0
         if shape is None and isinstance(ndarray, numpy.ndarray) and not self.defer:
-            self.data = numpy.zeros(ndarray.shape, dtype=numpy.int16)
+            self.data.set(numpy.zeros(ndarray.shape, dtype=numpy.int16))
         elif shape is not None and not self.defer:
-            self.data = numpy.zeros(shape, dtype=numpy.int16)
+            self.data.set(numpy.zeros(shape, dtype=numpy.int16))
         elif not self.defer and self.filename:
-            self.data = None
+            self.data.set(None)
             self.load()
         else:
-            self.data = None
+            self.data.set(None)
         if ndarray is not None and self.data is not None:
             self.endindex = len(ndarray)
             self.data[0:self.endindex] = ndarray
@@ -344,11 +349,11 @@ class AudioData(AudioRenderable):
         ndarray = numpy.array(data, dtype=numpy.int16)
         if self.numChannels > 1:
             ndarray.resize((numFrames, self.numChannels))
-        self.data = numpy.zeros(ndarray.shape, dtype=numpy.int16)
+        self.data.set(numpy.zeros(ndarray.shape, dtype=numpy.int16))
         self.endindex = 0
         if ndarray is not None:
             self.endindex = len(ndarray)
-            self.data = ndarray
+            self.data.set(ndarray)
         if temp_file_handle is not None:
             os.close(temp_file_handle)
         w.close()
@@ -406,21 +411,22 @@ class AudioData(AudioRenderable):
                 extra_shape = (num_samples,)
             else:
                 extra_shape = (num_samples, self.numChannels)
-            self.data = numpy.append(self.data, 
-                                     numpy.zeros(extra_shape, dtype=numpy.int16), axis=0)
+            self.data.append(numpy.zeros(extra_shape, dtype=numpy.int16))
         
     def append(self, another_audio_data):
         "Appends the input to the end of this `AudioData`."
         extra = len(another_audio_data.data) - (len(self.data) - self.endindex) 
         self.pad_with_zeros(extra)
-        self.data[self.endindex : self.endindex + len(another_audio_data)] += another_audio_data.data
+
+        self.data[self.endindex : self.endindex + len(another_audio_data)] = \
+            numpy.array(self.data[self.endindex : self.endindex + len(another_audio_data)]) + numpy.array(list(another_audio_data.data), dtype=self.data.dtype)
         self.endindex += another_audio_data.endindex
     
     def sum(self, another_audio_data):
         extra = len(another_audio_data.data) - len(self.data)
         self.pad_with_zeros(extra)
         compare_limit = min(len(another_audio_data.data), len(self.data)) - 1
-        self.data[ : compare_limit] += another_audio_data.data[ : compare_limit]
+        self.data[0:compare_limit] = self.data[ : compare_limit] + another_audio_data.data[ : compare_limit]
     
     def add_at(self, time, another_audio_data):
         """
@@ -432,13 +438,10 @@ class AudioData(AudioRenderable):
         self.pad_with_zeros(extra)
         if another_audio_data.numChannels < self.numChannels:
             another_audio_data.data = numpy.repeat(another_audio_data.data, self.numChannels).reshape(len(another_audio_data), self.numChannels)
-        self.data[offset : offset + len(another_audio_data.data)] += another_audio_data.data 
+        self.data[offset : offset + len(another_audio_data)] = data[offset : offset + len(another_audio_data.data)] + another_audio_data.data
     
     def __len__(self):
-        if self.data is not None:
-            return len(self.data)
-        else:
-            return 0
+        return len(self.data)
 
     def __add__(self, other):
         """Supports stuff like this: sound3 = sound1 + sound2"""
@@ -478,6 +481,10 @@ class AudioData(AudioRenderable):
         # data chunk
         fid.write('data')
         fid.write(struct.pack('<i', self.data.nbytes))
+
+        import pdb
+        pdb.set_trace()
+
         self.data.tofile(fid)
         # Determine file size and place it in correct
         # position at start of the file. 
@@ -503,7 +510,7 @@ class AudioData(AudioRenderable):
         return filename
     
     def unload(self):
-        self.data = None
+        self.data.delete()
         if self.convertedfile:
             if self.verbose:
                 print >> sys.stderr, "Deleting: %s" % self.convertedfile
@@ -525,16 +532,28 @@ class AudioData(AudioRenderable):
     @property
     def source(self):
         return self
-    
+
+    def __setattr__(self, attr, value):
+        if attr == 'data' and hasattr(self, attr):
+            self.data.set(value)
+        else:
+            self.__dict__[attr] = value
+
 
 class AudioData32(AudioData):
     """A 32-bit variant of AudioData, intended for data collection on 
     audio rendering with headroom."""
-    def __init__(self, filename=None, ndarray = None, shape=None, sampleRate=None, numChannels=None, defer=False, verbose=True):
+    def __init__(self, filename=None, ndarray = None, shape=None, sampleRate=None, numChannels=None, defer=False, verbose=True, data_on_disk=False):
         """
         Special form of AudioData to allow for headroom when collecting samples.
         """
         self.verbose = verbose
+
+        if data_on_disk:
+            self.data = OnDiskData()
+        else:
+            self.data = InMemoryData()
+        
         if (filename is not None) and (ndarray is None) :
             if sampleRate is None or numChannels is None:
                 # force sampleRate and numChannels to 44100 hz, 2
@@ -547,15 +566,20 @@ class AudioData32(AudioData):
         self.sampleRate = sampleRate
         self.numChannels = numChannels
         self.convertedfile = None
-        self.normalized = None
+        
+        if data_on_disk:
+            self.normalized = OnDiskData()
+        else:
+            self.normalized = InMemoryData()
+
         if shape is None and isinstance(ndarray, numpy.ndarray) and not self.defer:
-            self.data = numpy.zeros(ndarray.shape, dtype=numpy.int32)
+            self.data.set(numpy.zeros(ndarray.shape, dtype=numpy.int32))
         elif shape is not None and not self.defer:
-            self.data = numpy.zeros(shape, dtype=numpy.int32)
+            self.data.set(numpy.zeros(shape, dtype=numpy.int32))
         elif not self.defer and self.filename:
             self.load()
         else:
-            self.data = None
+            self.data.set(None)
         self.endindex = 0
         if ndarray is not None and self.data is not None:
             self.endindex = len(ndarray)
@@ -584,7 +608,7 @@ class AudioData32(AudioData):
         ndarray = numpy.array(data, dtype=numpy.int16)
         if self.numChannels > 1:
             ndarray.resize((numFrames, self.numChannels))
-        self.data = numpy.zeros(ndarray.shape, dtype=numpy.int32)
+        self.data.set(numpy.zeros(ndarray.shape, dtype=numpy.int32))
         self.endindex = 0
         if ndarray is not None:
             self.endindex = len(ndarray)
@@ -634,7 +658,7 @@ class AudioData32(AudioData):
         fid.seek(4)
         fid.write(struct.pack('<i', size-8))
         fid.close()
-        self.normalized = None
+        self.normalized.delete()
         if not mp3:
             return tempfilename
         # now convert it to mp3
@@ -657,16 +681,16 @@ class AudioData32(AudioData):
     def normalize(self):
         """Return to 16-bit for encoding."""
         if self.numChannels == 1:
-            self.normalized = numpy.zeros((self.data.shape[0],), dtype=numpy.int16)
+            self.normalized.set(numpy.zeros((self.data.shape[0],), dtype=numpy.int16))
         else:
-            self.normalized = numpy.zeros((self.data.shape[0], self.data.shape[1]), dtype=numpy.int16)
+            self.normalized.set(numpy.zeros((self.data.shape[0], self.data.shape[1]), dtype=numpy.int16))
         
         factor = 32767.0 / numpy.max(numpy.absolute(self.data.flatten()))
         # If the max was 32768, don't bother scaling:
         if factor < 1.000031:
-            self.normalized[:len(self.data)] += self.data * factor
+            self.normalized.set(self.normalized[:len(self.data)] + self.data * factor)
         else:
-            self.normalized[:len(self.data)] += self.data
+            self.normalized.set(self.normalized[:len(self.data)] + self.data)
     
     def pad_with_zeros(self, num_samples):
         if num_samples > 0:
@@ -674,9 +698,154 @@ class AudioData32(AudioData):
                 extra_shape = (num_samples,)
             else:
                 extra_shape = (num_samples, self.numChannels)
-            self.data = numpy.append(self.data, 
-                                     numpy.zeros(extra_shape, dtype=numpy.int32), axis=0)
+            self.data.append(numpy.zeros(extra_shape, dtype=numpy.int32))
+
+
+class InMemoryData(list):
+
+    def __init__(self):
+        self.data = None
+
+    def set(self, data):
+        self.data = data
+
+    def __getslice__(self, start, stop):
+        return self.__getitem__(slice(start, stop, 1))
+
+    def __setslice__(self, start, stop, seq):
+        self.__setitem__(slice(start, stop, 1), seq)
+
+    def __getitem__(self, key):
+        if isinstance(key, slice):
+            return self.data[key.start:key.stop:key.step]
+        elif isinstance(key, tuple):
+            if isinstance(key[0], slice):
+                return self.data[key[0].start:key[0].stop:key[0].step, key[1].start:key[1].stop:key[1].step]
+            else:
+                return self.data[key[0], key[1]]
+        else:
+            return self.data[key]
+
+    def __setitem__(self, key, value):
+        if isinstance(key, slice):
+            for i, k in enumerate(xrange(key.start, key.stop, 1 if key.step is None else key.step)):
+                self.data[k] = value[i]
+        else:
+            self.data[key] = value
+
+    def __len__(self):
+        return len(self.data)
+
+    def append(self, data):
+        self.data = numpy.append(self.data, data, axis=0)
+
+    def delete(self):
+        self.data = None
+
+class OnDiskData(list):
     
+    def __init__(self):
+        f, self.filename = tempfile.mkstemp('.dat')
+        os.close(f)
+        self.file = open(self.filename, 'w+b')
+        self.length = 0
+        self.channels = None
+        self.dtype = None
+        self.nbytes = None
+
+    def set(self, data):
+        if data is not None:
+            self.channels = data.shape[1]
+            self.write_slice(0, len(data), data)
+            self.length = len(data)
+            self.dtype = data.dtype
+            self.nbytes = data.nbytes
+
+    def __getslice__(self, start, stop):
+        return self.__getitem__(slice(start, stop, 1))
+
+    def __setslice__(self, start, stop, seq):
+        self.__setitem__(slice(start, stop, 1), seq)
+
+    def __getitem__(self, key):
+        print 'key: %s' % repr(key)
+        if isinstance(key, slice):
+            print key.step
+            if key.step is not None and key.step != 1:
+                raise Exception('step != 1 is not supported in OnDiskData')
+            return self.read_slice(key.start, key.stop)
+        elif isinstance(key, tuple):
+            if isinstance(key[0], slice):
+                if key[0].step is not None and key[0].step != 1:
+                    raise Exception('step != 1 is not supported in OnDiskData')
+                return self.read_slice(key[0].start, key[0].stop, key[1])
+            else:
+                return self.data[key[0], key[0] + 1, slice(key[1], key[1] + 1, 1)]
+        else:
+            return self.read_slice(key, key + 1)
+
+    def __setitem__(self, key, value):
+        if isinstance(key, slice):
+            if key.step is not None and key.step != 1:
+                raise Exception('step != 1 is not supported in OnDiskData')
+            self.write_slice(key.start, key.stop, value)
+        else:
+            self.write_slice(key, key + 1, value)
+
+    def read_slice(self, start, stop, second_slice = None):
+        if start is None:
+            start = 0
+        if stop is None:
+            stop = self.length
+
+        self.file.seek(start * 8 * self.channels, os.SEEK_SET)
+        print 'done seeking'
+        raw = self.file.read((stop - start) * 8 * self.channels)
+        data = numpy.array(struct.unpack('%sd' % (len(raw) / 8), raw))
+        data = data.reshape((len(data) / self.channels, self.channels))
+        
+        if second_slice:
+            return data.__getitem__((slice(None, None, None), second_slice))
+        return data
+
+    def write_slice(self, start, stop, data):
+        data = data.flatten()
+        self.file.seek(start * 8 * self.channels, os.SEEK_SET)
+        print 'before write'
+        start *= self.channels
+        stop *= self.channels
+        per_iter = 100000
+        for i in xrange(0, stop - start, per_iter):
+            self.file.write(struct.pack('%sd' % min(per_iter, len(data) - i), *data[i : i + per_iter]))
+        print 'after write'
+        self.file.flush()
+
+    def __len__(self):
+        return self.length
+
+    def __getattr__(self, attr):
+        if attr == 'shape':
+            return (self.length, self.channels)
+        if attr == 'dtype':
+            return self.dtype
+        if attr == 'nbytes':
+            return self.nbytes
+
+    def __iter__(self):
+        for x in self.read_slice(0, self.length):
+            yield x
+
+    def append(self, data):
+        self.write_slice(self.length, self.length + data.length, data)
+        self.length += data.length
+
+    def delete(self):
+        self.file.close()
+        os.unlink(self.filename)
+
+    def tofile(self, *args, **kwargs):
+        numpy.array(list(self), dtype=self.dtype).tofile(*args, **kwargs)
+
 
 def get_os():
     """returns is_linux, is_mac, is_windows"""
