@@ -56,7 +56,7 @@ class Capsule:
                 if progress_callback is not None:
                     progress_callback(0.9 * len(self.tracks) / float(len(audio_files)))
 
-            except Exception, e:
+            except urllib2.HTTPError, e:
                 if self.verbose:
                     print >> sys.stderr, 'Failed to analyse %s [%s]' % (filename, e)
 

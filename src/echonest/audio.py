@@ -482,9 +482,6 @@ class AudioData(AudioRenderable):
         fid.write('data')
         fid.write(struct.pack('<i', self.data.nbytes))
 
-        import pdb
-        pdb.set_trace()
-
         self.data.tofile(fid)
         # Determine file size and place it in correct
         # position at start of the file. 
@@ -832,8 +829,12 @@ class OnDiskData(list):
             return self.nbytes
 
     def __iter__(self):
-        for x in self.read_slice(0, self.length):
-            yield x
+        self.file.seek(0, os.SEEK_SET)
+        print 'done seeking'
+        for i in xrange(self.length):
+            raw = self.file.read(8 * self.channels)
+            data = struct.unpack('%sd' % (len(raw) / 8), raw)
+            yield data
 
     def append(self, data):
         self.write_slice(self.length, self.length + data.length, data)
