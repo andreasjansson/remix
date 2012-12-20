@@ -884,12 +884,15 @@ class OnDiskData(list):
         self.file.close()
         os.unlink(self.filename)
 
-    def tofile(self, *args, **kwargs):
+    def tofile(self, fid, sep="", format="%s"):
 
         if self.zeros == True:
-            numpy.zeros((self.length, self.channels)).tofile(*args, **kwargs)
+            numpy.zeros((self.length, self.channels)).tofile(fid, sep, format)
         else:
-            numpy.array(list(self), dtype=self.dtype).tofile(*args, **kwargs)
+            for s in self:
+                s = map(int, s)
+                fid.write(struct.pack('<%sh' % len(s), *s))
+            #numpy.array(list(self), dtype=self.dtype).tofile(*args, **kwargs)
 
 
 def get_os():
