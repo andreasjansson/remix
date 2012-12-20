@@ -36,6 +36,7 @@ import struct
 import subprocess
 import tempfile
 import wave
+import math
 
 from pyechonest import track
 import pyechonest.util
@@ -507,7 +508,7 @@ class AudioData(AudioRenderable):
         return filename
     
     def unload(self):
-        self.data.delete()
+        self.data = None
         if self.convertedfile:
             if self.verbose:
                 print >> sys.stderr, "Deleting: %s" % self.convertedfile
@@ -520,7 +521,7 @@ class AudioData(AudioRenderable):
         if with_source != self:
             return
         to_audio.add_at(start, self)
-        return    
+        return
     
     @property
     def duration(self):
@@ -655,7 +656,7 @@ class AudioData32(AudioData):
         fid.seek(4)
         fid.write(struct.pack('<i', size-8))
         fid.close()
-        self.normalized.delete()
+        self.normalized = None
         if not mp3:
             return tempfilename
         # now convert it to mp3
@@ -749,14 +750,20 @@ class OnDiskData(list):
         self.channels = None
         self.dtype = None
         self.nbytes = None
+        self.zeros = False # optimisation, avoid double writes if all zeros
 
     def set(self, data):
         if data is not None:
             self.channels = data.shape[1]
-            self.write_slice(0, len(data), data)
             self.length = len(data)
             self.dtype = data.dtype
             self.nbytes = data.nbytes
+            
+            if numpy.all(data == 0):
+                self.zeros = True
+            else:
+                self.write_slice(0, len(data), data)
+                self.zeros = False
 
     def __getslice__(self, start, stop):
         return self.__getitem__(slice(start, stop, 1))
@@ -765,23 +772,51 @@ class OnDiskData(list):
         self.__setitem__(slice(start, stop, 1), seq)
 
     def __getitem__(self, key):
-        print 'key: %s' % repr(key)
-        if isinstance(key, slice):
-            print key.step
-            if key.step is not None and key.step != 1:
-                raise Exception('step != 1 is not supported in OnDiskData')
-            return self.read_slice(key.start, key.stop)
-        elif isinstance(key, tuple):
-            if isinstance(key[0], slice):
-                if key[0].step is not None and key[0].step != 1:
+        if self.zeros == False:
+            print 'key: %s' % repr(key)
+            if isinstance(key, slice):
+                if key.step is not None and key.step != 1:
                     raise Exception('step != 1 is not supported in OnDiskData')
-                return self.read_slice(key[0].start, key[0].stop, key[1])
+                return self.read_slice(key.start, key.stop)
+            elif isinstance(key, tuple):
+                if isinstance(key[0], slice):
+                    if key[0].step is not None and key[0].step != 1:
+                        raise Exception('step != 1 is not supported in OnDiskData')
+                    return self.read_slice(key[0].start, key[0].stop, key[1])
+                else:
+                    return self.data[key[0], key[0] + 1, slice(key[1], key[1] + 1, 1)]
             else:
-                return self.data[key[0], key[0] + 1, slice(key[1], key[1] + 1, 1)]
+                return self.read_slice(key, key + 1)
+
         else:
-            return self.read_slice(key, key + 1)
+            print 'optimising zeros'
+            if isinstance(key, slice):
+                step = 1 if key.step is None else key.step
+                nrows = math.ceil((key.stop - key.start) / float(step))
+                ncols = self.channels
+            elif isinstance(key, tuple):
+                if isinstance(key[0], slice):
+                    if key[0].step is not None and key[0].step != 1:
+                        raise Exception('step != 1 is not supported in OnDiskData')
+                    nrows = math.ceil(key[0].stop - key[0].start)
+                    colstart = 0 if key[1].start is None else key[1].start
+                    colstop = self.channels if key[1].stop is None else key[1].stop
+                    ncols = colstop - colstart
+                else:
+                    nrows = 1
+                    ncols = 1
+            else:
+                nrows = 1
+                ncols = self.channels
+            return numpy.zeros((nrows, ncols))
+                    
 
     def __setitem__(self, key, value):
+
+        if self.zeros == True:
+            self.write_slice(0, self.length, numpy.zeros((self.length, self.channels)))
+            self.zeros = False
+
         if isinstance(key, slice):
             if key.step is not None and key.step != 1:
                 raise Exception('step != 1 is not supported in OnDiskData')
@@ -837,15 +872,24 @@ class OnDiskData(list):
             yield data
 
     def append(self, data):
+
+        if self.zeros == True:
+            self.write_slice(0, self.length, numpy.zeros((self.length, self.channels)))
+            self.zeros = False
+
         self.write_slice(self.length, self.length + data.length, data)
         self.length += data.length
 
-    def delete(self):
+    def __del__(self):
         self.file.close()
         os.unlink(self.filename)
 
     def tofile(self, *args, **kwargs):
-        numpy.array(list(self), dtype=self.dtype).tofile(*args, **kwargs)
+
+        if self.zeros == True:
+            numpy.zeros((self.length, self.channels)).tofile(*args, **kwargs)
+        else:
+            numpy.array(list(self), dtype=self.dtype).tofile(*args, **kwargs)
 
 
 def get_os():
